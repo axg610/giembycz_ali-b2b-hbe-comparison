@@ -1,0 +1,313 @@
+```{r setup, include=F}
+library(tidyverse)
+library(pheatmap)
+library(fgsea)
+library(eulerr)
+library(writexl)
+```
+
+```{r data}
+tpm <- read_tsv("../data/ALI-B2B-HBE Form tpm clean.txt")
+dea <- read_tsv("../data/ALI-B2B-HBE Form dea clean.txt")
+
+#all sig genes
+all_sig <- character()
+for (f in list.files("../data/genelists form/", full.names = T)){
+  all_sig = c(all_sig, readLines(f))
+}
+all_sig <- unique(all_sig) %>% sort()
+writeLines(all_sig, "../data/genelists form/all_sig (1620).txt")
+rm(all_sig, f)
+```
+
+```{r heatmap}
+mat <- tpm %>% 
+  select(Gene, celltype, rep, time, treatment, log2fold) %>% 
+  mutate(sample = paste(celltype, rep, time, treatment, sep = "_")) %>% 
+  select(Gene, sample, log2fold) %>%
+  filter(Gene %in% readLines("../data/genelists/all_sig (1620).txt")) %>%
+  pivot_wider(names_from = "sample", values_from = "log2fold") %>%
+  select(
+    "Gene",
+    # # 2h
+    # "ALI_1_2h_NS", "ALI_2_2h_NS", "ALI_3_2h_NS", "ALI_4_2h_NS", "ALI_5_2h_NS", 
+    # "ALI_6_2h_NS", "ALI_7_2h_NS", "ALI_8_2h_NS", "ALI_9_2h_NS", "ALI_10_2h_NS",
+    "ALI_1_2h_Form", "ALI_2_2h_Form", "ALI_3_2h_Form", "ALI_4_2h_Form", "ALI_5_2h_Form", 
+    "ALI_6_2h_Form", "ALI_7_2h_Form", "ALI_8_2h_Form", "ALI_9_2h_Form", "ALI_10_2h_Form",
+    # "B2B_1_2h_NS", "B2B_2_2h_NS", "B2B_3_2h_NS", "B2B_4_2h_NS", "B2B_5_2h_NS",
+    "B2B_1_2h_Form", "B2B_2_2h_Form", "B2B_3_2h_Form", "B2B_4_2h_Form", "B2B_5_2h_Form",
+    # "HBE_1_2h_NS", "HBE_2_2h_NS", "HBE_3_2h_NS", "HBE_4_2h_NS", "HBE_5_2h_NS",
+    "HBE_1_2h_Form", "HBE_2_2h_Form", "HBE_3_2h_Form", "HBE_4_2h_Form", "HBE_5_2h_Form",
+    # 6h
+    # "ALI_1_6h_NS", "ALI_2_6h_NS", "ALI_3_6h_NS", "ALI_4_6h_NS", "ALI_5_6h_NS", 
+    # "ALI_6_6h_NS", "ALI_7_6h_NS", "ALI_8_6h_NS", "ALI_9_6h_NS", "ALI_10_6h_NS",
+    "ALI_1_6h_Form", "ALI_2_6h_Form", "ALI_3_6h_Form", "ALI_4_6h_Form", "ALI_5_6h_Form", 
+    "ALI_6_6h_Form", "ALI_7_6h_Form", "ALI_8_6h_Form", "ALI_9_6h_Form", "ALI_10_6h_Form",
+    # "B2B_1_6h_NS", "B2B_2_6h_NS", "B2B_3_6h_NS", "B2B_4_6h_NS", "B2B_5_6h_NS",
+    "B2B_1_6h_Form", "B2B_2_6h_Form", "B2B_3_6h_Form", "B2B_4_6h_Form", "B2B_5_6h_Form",
+    # "HBE_1_6h_NS", "HBE_2_6h_NS", "HBE_3_6h_NS", "HBE_4_6h_NS", "HBE_5_6h_NS",
+    "HBE_1_6h_Form", "HBE_2_6h_Form", "HBE_3_6h_Form", "HBE_4_6h_Form", "HBE_5_6h_Form"
+  ) %>%
+  column_to_rownames("Gene") %>% as.matrix()
+
+mat_zscore <- mat %>% t() %>% scale() %>% t()
+
+myCols = colorRampPalette(c("steelblue4", "steelblue3" , "white", "firebrick3", "firebrick4"))(200)
+
+mat_breaks = c(seq(min(mat), -0.5, length = 90),
+               seq(-0.49, 0.49, length = 20),
+               seq(0.5, max(mat), length = 90))
+
+pheatmap(mat, cluster_cols = F, clustering_method = "ward.D2",
+         color = myCols, breaks = mat_breaks,
+         filename = "prelim_heatmap_log2fold.png",
+         cellheight = 0.3, cellwidth = 10, show_rownames = F,
+         main = "Form-regulated genes (0.67 > fold > 1.5, FDR < 0.05 in any cell type),\nraw log2fold")
+
+mat_zscore_breaks = c(seq(min(mat_zscore), -0.5, length = 90),
+                      seq(-0.49, 0.49, length = 20),
+                      seq(0.5, max(mat_zscore), length = 90))
+
+pheatmap(mat_zscore, cluster_cols = F, clustering_method = "ward.D2",
+         color = myCols, breaks = mat_zscore_breaks,
+         filename = "prelim_heatmap_zscored.png",
+         cellheight = 0.3, cellwidth = 10, show_rownames = F,
+         main = "Form-regulated genes (0.67 > fold > 1.5, FDR < 0.05 in any cell type),\nz-score")
+
+rm(mat, mat_zscore, mat_breaks, mat_zscore_breaks, myCols)
+```
+
+```{r compare gene expression at 6h}
+#upreg
+all_up <- c(readLines("../data/genelists form/ALI_6h_up (38).txt"),
+            readLines("../data/genelists form/B2B_6h_up (278).txt"),
+            readLines("../data/genelists form/HBE_6h_up (374).txt")) %>%
+  unique() %>% sort() %>% as.data.frame(nm = "Gene") %>%
+  mutate(ali = if_else(Gene %in% readLines("../data/genelists form/ALI_6h_up (38).txt"), "ALI", NA),
+         b2b = if_else(Gene %in% readLines("../data/genelists form/B2B_6h_up (278).txt"), "B2B", NA),
+         hbe = if_else(Gene %in% readLines("../data/genelists form/HBE_6h_up (374).txt"), "HBE", NA)) %>%
+  group_by(Gene) %>% mutate(group = paste(na.omit(c(ali, b2b, hbe)), collapse = "&")) %>% ungroup() %>%
+  select(group) %>% count(group)
+
+set.seed(777)
+all_up_euler <- all_up %>% deframe() %>% euler(shape = "ellipse")
+all_up_venn <- all_up %>% deframe() %>% venn()
+
+png("up_6h_euler.png", width=480, height=480, res = 100)
+plot(all_up_euler,
+     quantities = list(type = c("counts")),
+     fills = c("#FFDD57", "#FF5733", "steelblue1"),
+     edges = list(col = "transparent", lwd = 1.5),
+     main = "Form-upregulated genes (6h)")
+dev.off()
+
+png("up_6h_venn.png", width=480, height=480, res = 100)
+plot(all_up_venn,
+     quantities = list(type = c("counts", "percent")),
+     fills = c("#FFDD57", "#FF5733", "steelblue1"),
+     edges = list(col = "transparent", lwd = 1.5),
+     main = "Form-upregulated genes (6h)")
+dev.off()
+
+#downreg
+all_dn <- c(readLines("../data/genelists form/ALI_6h_dn (6).txt"),
+            readLines("../data/genelists form/B2B_6h_dn (219).txt"),
+            readLines("../data/genelists form/HBE_6h_dn (525).txt")) %>%
+  unique() %>% sort() %>% as.data.frame(nm = "Gene") %>%
+  mutate(ali = if_else(Gene %in% readLines("../data/genelists/ALI_6h_dn (6).txt"), "ALI", NA),
+         b2b = if_else(Gene %in% readLines("../data/genelists/B2B_6h_dn (219).txt"), "B2B", NA),
+         hbe = if_else(Gene %in% readLines("../data/genelists/HBE_6h_dn (525).txt"), "HBE", NA)) %>%
+  group_by(Gene) %>% mutate(group = paste(na.omit(c(ali, b2b, hbe)), collapse = "&")) %>% ungroup() %>%
+  select(group) %>% count(group)
+
+set.seed(777)
+all_dn_euler <- all_dn %>% deframe() %>% euler(shape = "ellipse")
+all_dn_venn <- all_dn %>% deframe() %>% venn()
+
+png("dn_6h_euler.png", width=480, height=480, res = 100)
+plot(all_dn_euler,
+     quantities = list(type = c("counts")),
+     fills = c("#FFDD57", "#FF5733", "steelblue1"),
+     edges = list(col = "transparent", lwd = 1.5),
+     main = "Form-downregulated genes (6h)")
+dev.off()
+
+png("dn_6h_venn.png", width=480, height=480, res = 100)
+plot(all_dn_venn,
+     quantities = list(type = c("counts", "percent")),
+     fills = c("#FFDD57", "#FF5733", "steelblue1"),
+     edges = list(col = "transparent", lwd = 1.5),
+     main = "Form-downregulated genes (6h)")
+
+rm(all_dn, all_dn_euler, all_dn_venn, all_up, all_up_euler, all_up_venn)
+```
+
+```{r gsea at 6h}
+pathways_hallmark <- gmtPathways("../data/h.all.v2024.1.Hs.symbols.gmt")
+
+gsea_results <- data.frame(celltype = character(), time = character(), pathway = character(),
+                           pval = numeric(), padj = numeric(), log2err = numeric(), ES = numeric(), NES = numeric(), size = numeric(),
+                           leadingEdge = list())
+
+for (ct in unique(dea$celltype)){
+  
+  title = paste0(ct, " (6h)")
+  
+  #rank
+  ranks <- filter(dea, celltype == ct & time == "6h") %>%
+    arrange(-log2fold) %>% with(setNames(log2fold, Gene))
+  
+  #check ranks
+  png(paste0("GSEAranks_", title, ".png"), h = 240, w = 360)
+  barplot(ranks, main = title, ylab = expression(log[2] * "fold Form"))
+  dev.off()
+  
+  #run gsea
+  results <- fgsea(pathways = pathways_hallmark, stats = ranks) %>% arrange(-NES) %>%
+    mutate(pathway = gsub("HALLMARK_", "", pathway), pathway = gsub("_", " ", pathway)) %>%
+    mutate(celltype = ct, time = "6h")
+  
+  #save results
+  gsea_results <- rbind(gsea_results, results)
+  
+  #plot gsea
+  p <- ggplot(results, aes(x = NES, y = reorder(pathway, NES), fill = padj < 0.05)) +
+    geom_col() +
+    scale_x_continuous(breaks = seq(-100, 100, by = 1)) +
+    labs(x = "NES", title = title) +
+    theme_bw() + 
+    theme(axis.title.y = element_blank(), panel.grid = element_blank(), 
+          plot.title = element_text(hjust = 0.5), aspect.ratio = 3,
+          axis.text.y = element_text(size = 6)) +
+    guides(fill = "none")
+  ggsave(paste0("GSEAbarplot_", title, ".png"), h = 5, w = 5)
+}
+
+gsea_results <- gsea_results %>%
+  select(celltype, time, everything()) %>%
+  mutate(leadingEdge = sapply(leadingEdge, function(x) paste(sort(unlist(strsplit(x, ","))), collapse = ", ")))
+
+write_xlsx(gsea_results, "../data/annotation/gsea_readable.xlsx")
+write_tsv(gsea_results, "../data/annotation/gsea.txt")
+
+rm(p, pathways_hallmark, results, ct, ranks, title)
+```
+
+
+
+
+```{r read fsk data}
+fsk_tpm <- read_tsv("../data/ALI-B2B-HBE Fsk tpm clean.txt")
+fsk_dea <- read_tsv("../data/ALI-B2B-HBE Fsk dea clean.txt")
+
+#all sig genes
+all_sig <- character()
+for (f in list.files("../data/genelists fsk/", full.names = T)){
+  all_sig = c(all_sig, readLines(f))
+}
+all_sig <- unique(all_sig) %>% sort()
+writeLines(all_sig, "../data/genelists fsk/all_sig (1895).txt")
+rm(all_sig, f)
+```
+
+```{r fsk heatmap}
+mat <- fsk_tpm %>% 
+  select(Gene, celltype, rep, time, treatment, log2fold) %>% 
+  mutate(sample = paste(celltype, rep, time, treatment, sep = "_")) %>% 
+  select(Gene, sample, log2fold) %>%
+  filter(Gene %in% readLines("../data/genelists fsk/all_sig (1895).txt")) %>%
+  pivot_wider(names_from = "sample", values_from = "log2fold") %>%
+  select(!contains("NS")) %>%
+  column_to_rownames("Gene") %>% as.matrix()
+
+myCols = colorRampPalette(c("steelblue4", "steelblue2" , "white", "firebrick2", "firebrick4"))(300)
+
+mat_breaks = c(seq(min(mat), -0.5, length = 100),
+               seq(-0.49, 0.49, length = 100),
+               seq(0.5, max(mat), length = 100))
+
+pheatmap(mat, cluster_cols = F, clustering_method = "ward.D2",
+         color = myCols, breaks = mat_breaks,
+         filename = "fsk_prelim_heatmap_log2fold.png",
+         cellheight = 0.3, cellwidth = 10, show_rownames = F,
+         main = "Fsk-regulated genes\n(0.67 > fold > 1.5, FDR < 0.05 in any cell type),\nraw log2fold")
+
+# pull ordered matrix for mark
+mat_ord <- mat %>%
+  dist(method = "euclidean") %>%
+  hclust(method = "ward.D2") %>%
+  { mat[.$order, , drop = FALSE] } %>%
+  as.data.frame() %>%
+  rownames_to_column("Gene")
+
+write_xlsx(mat_ord, "fsk_prelim_heatmap_log2fold.xlsx")
+
+rm(mat, mat_breaks, myCols, mat_ord)
+```
+
+```{r fsk compare gene expression at 6h}
+all_sig <- readLines("../data/genelists fsk/all_sig (1895).txt") %>%
+  as.data.frame(nm = "Gene") %>%
+  mutate(ali = if_else(Gene %in% c(readLines("../data/genelists fsk/ALI_6h_up (454).txt"), readLines("../data/genelists fsk/ALI_6h_dn (555).txt")), 
+                       "ALI", NA),
+         hbe = if_else(Gene %in% c(readLines("../data/genelists fsk/HBE_6h_up (332).txt"), readLines("../data/genelists fsk/HBE_6h_dn (554).txt")),
+                       "HBE", NA),
+         b2b = if_else(Gene %in% c(readLines("../data/genelists fsk/B2B_6h_up (121).txt"), readLines("../data/genelists fsk/B2B_6h_dn (187).txt")), 
+                       "B2B", NA)) %>%
+  group_by(Gene) %>% mutate(group = paste(na.omit(c(ali, hbe, b2b)), collapse = "&")) %>% ungroup() 
+
+all_sig_counts <- all_sig %>%
+  select(group) %>% count(group)
+
+set.seed(777)
+
+png("fsk_6h_euler.png", width=480, height=480, res = 100)
+plot(all_sig_counts %>% deframe() %>% euler(shape = "ellipse"),
+     quantities = list(type = c("counts")),
+     # edges = list(col = "transparent", lwd = 1.5),
+     main = "Fsk-regulated genes (6h)")
+dev.off()
+
+
+#write genelists
+for (g in unique(all_sig$group)){
+  
+  name <- paste0(g, " (",  length(genes), ")")
+  
+  #get genelists
+  genes <- all_sig %>% filter(group == g) %>% pull(Gene) %>% unique() %>% sort()
+  writeLines(genes, paste0("fsk venn genelists/", name, ".txt"))
+  
+  #get full data for each genelist
+  df <- fsk_dea %>% filter(Gene %in% genes) %>%
+    select(Gene, celltype, time, treatment, fold, FDR, sig)
+  write_tsv(df, paste0("fsk venn data/", name, ".txt"))
+  
+  #get top10 induced
+  top10_up_genes <- df %>% filter(sig == "up") %>%
+    group_by(Gene) %>% summarize(fold = max(fold)) %>% ungroup() %>%
+    arrange(desc(fold)) %>% slice_head(n = 10) %>% pull(Gene)
+  writeLines(top10_up_genes, paste0("fsk venn genelists/top10induced_", g, ".txt"))
+  
+  top10_up_df <- fsk_dea %>% filter(Gene %in% top10_up_genes) %>%
+    select(Gene, celltype, time, treatment, fold, FDR, sig) %>%
+    arrange(Gene, desc(fold))
+  write_tsv(top10_up_df, paste0("fsk venn data/top10induced_", g, ".txt"))
+  
+  #get top10 repressed
+  top10_dn_genes <- df %>% filter(sig == "dn") %>%
+    group_by(Gene) %>% summarize(fold = min(fold)) %>% ungroup() %>%
+    arrange(fold) %>% slice_head(n = 10) %>% pull(Gene)
+  writeLines(top10_dn_genes, paste0("fsk venn genelists/top10repressed_", g, ".txt"))
+  
+  top10_dn_df <- fsk_dea %>% filter(Gene %in% top10_dn_genes) %>%
+    select(Gene, celltype, time, treatment, fold, FDR, sig) %>%
+    arrange(Gene, fold)
+  write_tsv(top10_dn_df, paste0("fsk venn data/top10repressed_", g, ".txt"))
+}
+
+rm(all_sig, all_sig_counts, g, genes, name, df,
+   top10_up_df, top10_dn_df,
+   top10_up_genes, top10_dn_genes)
+```
+

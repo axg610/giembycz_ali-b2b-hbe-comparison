@@ -1,0 +1,264 @@
+```{r setup, include=F}
+library(tidyverse)
+library(writexl)
+```
+
+```{r dea cleaning}
+ali_dea <- read_tsv("../data/sleuth form output/ali_dea.txt")
+b2b_dea <- read_tsv("../data/sleuth form output/b2b_dea.txt")
+hbe_dea <- read_tsv("../data/sleuth form output/hbe_dea.txt")
+
+dea_tidy <- rbind(ali_dea, b2b_dea, hbe_dea) %>%
+  mutate(FDR = if_else(is.na(FDR), 1, FDR),
+         fold = if_else(is.na(fold), 0, fold)) %>%
+  mutate(log2fold = fold, fold = 2^fold, .before = 6) %>%
+  mutate(sig = if_else(fold >= 1.5 & FDR < 0.05, "up",
+                       if_else(fold <= 0.67 & FDR < 0.05, "dn", "ns"))) %>%
+  arrange(Gene) %>%
+  distinct()
+
+write_tsv(dea_tidy, "../data/ALI-B2B-HBE Form dea clean.txt")
+
+#write genelists
+for (ct in unique(dea_tidy$celltype)){
+  for (s in c("up", "dn")){
+    for (t in unique(dea_tidy$time)){
+      
+      df <- dea_tidy %>% filter(celltype == ct & sig == s & time == t)
+      genes = df %>% pull(Gene) %>% unique() %>% sort()
+      len = length(genes)
+      name = paste0(ct, "_", t, "_", s, " (", len, ")")
+      filename = paste0("../data/genelists form/", name, ".txt")
+      
+      writeLines(genes, filename)
+    }
+  }
+}
+
+rm(ali_dea, b2b_dea, hbe_dea, df, ct, filename, genes, len, name, s, t)
+```
+
+```{r tpm cleaning}
+ali_tpm <- read_tsv("../data/sleuth form output/ali_tpm.txt") %>%
+  mutate(celltype = "ALI", .before = 2) %>%
+  select(-sample)
+
+b2b_tpm <- read_tsv("../data/sleuth form output/b2b_tpm.txt") %>%
+  mutate(celltype = "B2B", .before = 2) %>%
+  select(-sample)
+
+hbe_tpm <- read_tsv("../data/sleuth form output/hbe_tpm.txt") %>%
+  mutate(celltype = "HBE", .before = 2) %>%
+  group_by(Gene, celltype, rep, time, treatment) %>% summarize(tpm = mean(tpm), .groups = "keep") %>% ungroup()
+
+tpm_tidy <- rbind(ali_tpm, b2b_tpm, hbe_tpm) %>%
+  group_by(Gene, celltype, rep, time) %>%
+  mutate(tpm = tpm + 0.1) %>%
+  mutate(fold = tpm / tpm[treatment == "NS"]) %>%
+  ungroup() %>%
+  select(Gene, celltype, rep, time, treatment, tpm, fold) %>%
+  rename(old_rep = rep) %>%
+  mutate(rep = as.character(old_rep), .before = 3) %>%
+  mutate(rep = recode(old_rep,
+                      "K" = "1", "L" = "2", "M" = "3", "N" = "4", "P" = "5",
+                      "Q" = "6", "R" = "7", "X" = "8", "Y" = "9", "Z" = "10",
+                      "49" = "1", "57" = "2", "42" = "3", "48" = "4", "51" = "5"),
+         .before = 3) %>%
+  mutate(log2fold = log2(fold))
+
+write_tsv(tpm_tidy, "../data/ALI-B2B-HBE Form tpm clean.txt")
+
+rm(ali_tpm, b2b_tpm, hbe_tpm)
+```
+
+```{r tpm pivoting for excel}
+tpm_pivot <- list()
+
+for (ct in c("ALI", "B2B", "HBE")){
+  for(t in c("2h", "6h")){
+    
+    name = paste(ct, t, sep = "_")
+    
+    df <- filter(tpm_tidy, celltype == ct & time == t) %>%
+      mutate(sample = paste(treatment, rep, sep = "_")) %>%
+      select(Gene, celltype, time, sample, tpm) %>%
+      pivot_wider(names_from = "sample", values_from = "tpm") %>%
+      select(Gene, celltype, time, sort(names(.)[grepl("NS", names(.))]), sort(names(.)[grepl("Form", names(.))]))
+    
+    tpm_pivot[[name]] <- df
+  }
+}
+
+write_xlsx(tpm_pivot, "../data/wide data/ALI-B2B-HBE Form tpm clean wide.xlsx")
+
+fold_pivot <- list()
+
+for (ct in c("ALI", "B2B", "HBE")){
+  for(t in c("2h", "6h")){
+    
+    name = paste(ct, t, sep = "_")
+    
+    df <- filter(tpm_tidy, celltype == ct & time == t & treatment != "NS") %>%
+      mutate(sample = paste(treatment, rep, sep = "_")) %>%
+      select(Gene, celltype, time, sample, fold) %>%
+      pivot_wider(names_from = "sample", values_from = "fold") %>%
+      select(Gene, celltype, time, sort(names(.)[grepl("NS", names(.))]), sort(names(.)[grepl("Form", names(.))]))
+    
+    tpm_pivot[[name]] <- df
+  }
+}
+
+write_xlsx(tpm_pivot, "../data/wide data/ALI-B2B-HBE Form tpm_fold clean wide.xlsx")
+
+rm(df, fold_pivot, tpm_pivot, ct, name, t)
+```
+
+```{r dea pivoting for excel}
+dea_2h <- filter(dea_tidy, time == "2h") %>%
+  select(Gene, time, treatment, celltype, fold, FDR) %>%
+  pivot_wider(names_from = "celltype", values_from = c("fold", "FDR")) %>%
+  select(Gene, time, treatment, 
+         fold_ALI, FDR_ALI,
+         fold_B2B, FDR_B2B,
+         fold_HBE, FDR_HBE)
+
+dea_6h <- filter(dea_tidy, time == "6h") %>%
+  select(Gene, time, treatment, celltype, fold, FDR) %>%
+  pivot_wider(names_from = "celltype", values_from = c("fold", "FDR")) %>%
+  select(Gene, time, treatment, 
+         fold_ALI, FDR_ALI,
+         fold_B2B, FDR_B2B,
+         fold_HBE, FDR_HBE)
+
+write_xlsx(list("dea_2h" = dea_2h,
+                "dea_6h" = dea_6h),
+           "../data/wide data/ALI-B2B-HBE Form dea clean wide.xlsx")
+
+rm(dea_2h, dea_6h)
+```
+
+```{r fsk dea cleaning}
+ali_dea <- read_tsv("../data/sleuth fsk output/ali_dea.txt")
+hbe_dea <- read_tsv("../data/sleuth fsk output/hbe_dea.txt")
+b2b_dea <- read_tsv("../data/sleuth fsk output/b2b_dea.txt")
+
+fsk_dea_tidy <- rbind(ali_dea, hbe_dea) %>% rbind(., b2b_dea) %>%
+  mutate(FDR = if_else(is.na(FDR), 1, FDR),
+         fold = if_else(is.na(fold), 0, fold)) %>%
+  mutate(log2fold = fold, fold = 2^fold, .before = 6) %>%
+  mutate(sig = if_else(fold >= 1.5 & FDR < 0.05, "up",
+                       if_else(fold <= 0.67 & FDR < 0.05, "dn", "ns"))) %>%
+  arrange(Gene) %>%
+  distinct()
+
+write_tsv(fsk_dea_tidy, "../data/ALI-B2B-HBE Fsk dea clean.txt")
+
+#write genelists
+for (ct in unique(fsk_dea_tidy$celltype)){
+  for (s in c("up", "dn")){
+    for (t in unique(fsk_dea_tidy$time)){
+      
+      df <- fsk_dea_tidy %>% filter(celltype == ct & sig == s & time == t)
+      genes = df %>% pull(Gene) %>% unique() %>% sort()
+      len = length(genes)
+      name = paste0(ct, "_", t, "_", s, " (", len, ")")
+      filename = paste0("../data/genelists fsk/", name, ".txt")
+      
+      writeLines(genes, filename)
+    }
+  }
+}
+
+rm(ali_dea, hbe_dea, df, ct, filename, genes, len, name, s, t)
+```
+
+```{r fsk tpm cleaning}
+ali_tpm <- read_tsv("../data/sleuth fsk output/ali_tpm.txt") %>%
+  mutate(celltype = "ALI", .before = 2) %>%
+  select(-sample)
+
+hbe_tpm <- read_tsv("../data/sleuth fsk output/hbe_tpm.txt") %>%
+  mutate(celltype = "HBE", .before = 2) %>%
+  group_by(Gene, celltype, rep, time, treatment) %>% summarize(tpm = mean(tpm), .groups = "keep") %>% ungroup()
+
+b2b_tpm <- read_tsv("../data/sleuth fsk output/b2b_tpm.txt") %>%
+  mutate(celltype = "B2B", .before = 2) %>%
+  group_by(Gene, celltype, rep, time, treatment) %>% summarize(tpm = mean(tpm), .groups = "keep") %>% ungroup()
+
+fsk_tpm_tidy <- rbind(ali_tpm, hbe_tpm) %>% rbind(., b2b_tpm) %>%
+  group_by(Gene, celltype, rep, time) %>%
+  mutate(tpm = tpm + 0.1) %>%
+  mutate(fold = tpm / tpm[treatment == "NS"]) %>%
+  ungroup() %>%
+  select(Gene, celltype, rep, time, treatment, tpm, fold) %>%
+  rename(old_rep = rep) %>%
+  mutate(rep = as.character(old_rep), .before = 3) %>%
+  mutate(rep = recode(old_rep,
+                      "K" = "1", "L" = "2", "M" = "3", "N" = "4", "P" = "5",
+                      "Q" = "6", "R" = "7", "X" = "8", "Y" = "9", "Z" = "10",
+                      "49" = "1", "57" = "2", "42" = "3", "48" = "4", "51" = "5"),
+         .before = 3) %>%
+  mutate(log2fold = log2(fold))
+
+write_tsv(fsk_tpm_tidy, "../data/ALI-B2B-HBE Fsk tpm clean.txt")
+
+rm(ali_tpm, hbe_tpm)
+```
+
+```{r fsk tpm pivoting for excel}
+tpm_pivot <- list()
+
+for (ct in c("ALI", "HBE", "B2B")){
+  for(t in c("6h")){
+    
+    name = paste(ct, t, sep = "_")
+    
+    df <- filter(fsk_tpm_tidy, celltype == ct & time == t) %>%
+      mutate(sample = paste(treatment, rep, sep = "_")) %>%
+      select(Gene, celltype, time, sample, tpm) %>%
+      pivot_wider(names_from = "sample", values_from = "tpm") %>%
+      select(Gene, celltype, time, sort(names(.)[grepl("NS", names(.))]), sort(names(.)[grepl("Fsk", names(.))]))
+    
+    tpm_pivot[[name]] <- df
+  }
+}
+
+write_xlsx(tpm_pivot, "../data/_UPDATED wide data/ALI-B2B-HBE Fsk tpm clean wide.xlsx")
+
+fold_pivot <- list()
+
+for (ct in c("ALI", "HBE", "B2B")){
+  for(t in c("6h")){
+    
+    name = paste(ct, t, sep = "_")
+    
+    df <- filter(fsk_tpm_tidy, celltype == ct & time == t & treatment != "NS") %>%
+      mutate(sample = paste(treatment, rep, sep = "_")) %>%
+      select(Gene, celltype, time, sample, fold) %>%
+      pivot_wider(names_from = "sample", values_from = "fold") %>%
+      select(Gene, celltype, time, sort(names(.)[grepl("NS", names(.))]), sort(names(.)[grepl("Fsk", names(.))]))
+    
+    tpm_pivot[[name]] <- df
+  }
+}
+
+write_xlsx(tpm_pivot, "../data/_UPDATED wide data/ALI-B2B-HBE Fsk tpm_fold clean wide.xlsx")
+
+rm(df, fold_pivot, tpm_pivot, ct, name, t)
+```
+
+```{r fsk dea pivoting for excel}
+dea_6h <- filter(fsk_dea_tidy, time == "6h") %>%
+  select(Gene, time, treatment, celltype, fold, FDR) %>%
+  pivot_wider(names_from = "celltype", values_from = c("fold", "FDR")) %>%
+  select(Gene, time, treatment, 
+         fold_ALI, FDR_ALI,
+         fold_HBE, FDR_HBE,
+         fold_B2B, FDR_B2B)
+
+write_xlsx(list("dea_6h" = dea_6h),
+           "../data/_UPDATED wide data/ALI-B2B-HBE Fsk dea clean wide.xlsx")
+
+rm(dea_6h)
+```
+

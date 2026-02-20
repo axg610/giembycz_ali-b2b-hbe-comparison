@@ -1,0 +1,39 @@
+```{r setup, include=F}
+library(tidyverse)
+library(readxl)
+library(writexl)
+```
+
+```{r multi-way correlation function from taylor 2020}
+cor_taylor <- function(X){
+  if(!inherits(X,"matrix")){
+    stop("Input must be inherit ’matrix’ class.")
+  }
+  n <- ncol(X)
+  return((1/sqrt(n))*sd(eigen(cor(X))$values))
+}
+```
+
+```{r run stats on matrices from mark}
+cor_df <- data.frame()
+
+for (f in list.files("matrices from mark/")){
+  
+  nm = gsub(".xlsx", "", f)
+  
+  mat = read_xlsx(paste0("matrices from mark/", f), col_names = F) %>%
+    as.matrix()
+  
+  cor <- cor_taylor(mat)
+  
+  df <- data.frame(matrix_name = nm, correlation = cor)
+  
+  cor_df = rbind(cor_df, df)
+}
+
+write_xlsx(cor_df, "multi-way correlations.xlsx")
+
+# rm(df, mat, cor, f, nm)
+```
+
+
