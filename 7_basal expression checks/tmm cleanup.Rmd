@@ -1,0 +1,56 @@
+```{r setup, include=F}
+library(tidyverse)
+library(readxl)
+library(writexl)
+```
+
+```{r read and clean}
+tmm_raw = readRDS("../data/basal comparisons/tmm_df.rds")
+
+tmm_clean = tmm_raw %>%
+  mutate(
+    celltype = factor(celltype, levels = c("B2B", "ALI", "HBE", "brushings")),
+    time = factor(time, levels = c("2h", "6h", "0h")),
+    rep = factor(rep, levels = unique(rep))
+  ) %>%
+  arrange(Gene, celltype, time, rep) %>%
+  mutate(sample = factor(sample, levels = unique(sample))) %>%
+  group_by(Gene) %>%
+  filter(!all(tmm_count == 0)) %>%
+  ungroup() %>%
+  filter(grepl("^[A-Za-z0-9]+$", Gene)) %>%
+  group_by(Gene, sample, celltype, treatment, time, rep) %>%
+  summarise(
+    tmm_count = sum(tmm_count),
+    .groups = "drop"
+  )
+```
+
+```{r pivot wide for mark}
+wide = tmm_clean %>%
+  select(-c(celltype, treatment, time, rep)) %>%
+  pivot_wider(values_from = "tmm_count", names_from = "sample")
+
+wide_mean = tmm_clean %>%
+  group_by(Gene, celltype, treatment, time) %>%
+  summarize(tmm_count = mean(tmm_count), .groups = "drop") %>%
+  mutate(sample = paste(celltype, time, sep = "_")) %>%
+  select(-c(celltype, treatment, time)) %>%
+  pivot_wider(values_from = "tmm_count", names_from = "sample")
+
+wide_mean2 = tmm_clean %>%
+  group_by(Gene, celltype, treatment) %>%
+  summarize(tmm_count = mean(tmm_count), .groups = "drop") %>%
+  select(-c(treatment)) %>%
+  pivot_wider(values_from = "tmm_count", names_from = "celltype")
+
+write_xlsx(
+  list(
+    "tmm-adjusted counts" = wide,
+    "mean reps, time-sensitive" = wide_mean,
+    "mean reps, time-agnostic" =  wide_mean2
+  ), 
+  "../data/basal comparisons/wide_tmm-adjusted-counts.xlsx"
+)
+```
+
