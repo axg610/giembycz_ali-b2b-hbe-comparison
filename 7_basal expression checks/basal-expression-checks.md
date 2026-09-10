@@ -86,8 +86,15 @@ tmm_cpm <- cpm(dge, normalized.lib.sizes = TRUE)
 # 5. re-map gene ids and cleanup
 # ------------------------------------------------------------
 
-gene_map <- read_tsv("/work/newton_lab/mm_analysis/ref_sequence/GRCh38.p13_hgnc_t2g.txt") %>%
-    select(GENEID = gene_id, Gene = gene_symbol)
+gene_map <- read_tsv(
+  "/work/newton_lab/mm_analysis/ref_sequence/GRCh38.p13_hgnc_t2g.txt"
+) %>%
+  select(GENEID = gene_id, Gene = gene_symbol) %>%
+  filter(!is.na(Gene), Gene != "") %>%
+  distinct(GENEID, Gene) %>%
+  group_by(GENEID) %>%
+  filter(n() == 1) %>%
+  ungroup()
 
 sample_info <- meta %>%
   distinct(sample, celltype, treatment, time, rep)
@@ -95,6 +102,7 @@ sample_info <- meta %>%
 tmm_df <- as.data.frame(tmm_cpm) %>%
   rownames_to_column("GENEID") %>%
   left_join(gene_map, by = "GENEID") %>%
+  filter(!is.na(Gene)) %>%
   relocate(Gene, .before = 1) %>%
   select(-GENEID) %>%
   pivot_longer(
@@ -103,7 +111,11 @@ tmm_df <- as.data.frame(tmm_cpm) %>%
     values_to = "tmm_count"
   ) %>%
   left_join(sample_info, by = "sample") %>%
-  relocate(tmm_count, .after = rep)
+  relocate(tmm_count, .after = rep) %>%
+  distinct()
+
+saveRDS(tmm_df, "tmm_df.rds")
+
 ```
 
 
