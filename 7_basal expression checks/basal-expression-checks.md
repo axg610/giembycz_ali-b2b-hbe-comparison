@@ -39,7 +39,7 @@ meta = read_tsv("meta_ali-b2b-hbe-brushings_basal.txt")
 tx2gene <- read_tsv("/work/newton_lab/mm_analysis/ref_sequence/GRCh38.p13_hgnc_t2g.txt") %>%
     select(TXNAME = target_id, GENEID = gene_id)
 
-files <- file.path(meta$path, "abundance.tsv")
+files <- file.path(meta$path, "abundance.h5")
 names(files) <- meta$sample
 
 # ------------------------------------------------------------
@@ -70,20 +70,30 @@ counts_bio <- sapply(unique(sample_id), function(s) {
 # Preserve gene IDs
 rownames(counts_bio) <- rownames(txi$counts)
 
+
+
+
+
+
+
+
 # ------------------------------------------------------------
-# 3. run edgeR with TMM normalization, then pull cpms
+# 3b. TMM: run edgeR with TMM normalization, then pull cpms
 # ------------------------------------------------------------
 
 dge <- DGEList(counts = counts_bio)
 
 dge <- calcNormFactors(dge, method = "TMM")
 
-dge$samples
+write_tsv(
+  dge$samples %>% rownames_to_column("sample"), 
+  "tmm_normfactors.txt"
+  )
 
 tmm_cpm <- cpm(dge, normalized.lib.sizes = TRUE)
 
 # ------------------------------------------------------------
-# 5. re-map gene ids and cleanup
+# 4b. re-map gene ids and cleanup
 # ------------------------------------------------------------
 
 gene_map <- read_tsv(
@@ -108,14 +118,119 @@ tmm_df <- as.data.frame(tmm_cpm) %>%
   pivot_longer(
     cols = -Gene,
     names_to = "sample",
-    values_to = "tmm_count"
+    values_to = "value"
   ) %>%
   left_join(sample_info, by = "sample") %>%
-  relocate(tmm_count, .after = rep) %>%
+  relocate(value, .after = rep) %>%
   distinct()
 
 saveRDS(tmm_df, "tmm_df.rds")
 
+
+
+
+# ------------------------------------------------------------
+# 3c. GeTMM: normalize to effective length, then run TMM
+# ------------------------------------------------------------
+
+# gene lengths corresponding to each biological sample
+length_bio <- sapply(unique(sample_id), function(s) {
+    idx <- sample_id == s
+    rowMeans(txi$length[, idx, drop = FALSE])
+})
+
+# preserve gene id's
+rownames(length_bio) <- rownames(txi$length)
+
+# correct counts_bio with gene lengths
+counts_length_corrected <- counts_bio / length_bio
+
+
+# run edgeR with TMM normalization
+
+dge_length_corrected = DGEList(counts = counts_length_corrected)
+
+dge_length_corrected <- calcNormFactors(
+    dge_length_corrected,
+    method = "TMM"
+)
+
+write_tsv(
+  dge_length_corrected$samples %>% rownames_to_column("sample"), 
+  "geTMM_normfactors.txt"
+  )
+
+geTMM_cpm = cpm(
+  dge_length_corrected,
+  normalized.lib.sizes = TRUE
+)
+
+# ------------------------------------------------------------
+# 4c. re-map gene ids and cleanup
+# ------------------------------------------------------------
+
+gene_map <- read_tsv(
+  "/work/newton_lab/mm_analysis/ref_sequence/GRCh38.p13_hgnc_t2g.txt"
+) %>%
+  select(GENEID = gene_id, Gene = gene_symbol) %>%
+  filter(!is.na(Gene), Gene != "") %>%
+  distinct(GENEID, Gene) %>%
+  group_by(GENEID) %>%
+  filter(n() == 1) %>%
+  ungroup()
+
+sample_info <- meta %>%
+  distinct(sample, celltype, treatment, time, rep)
+
+geTMM_df <- as.data.frame(geTMM_cpm) %>%
+  rownames_to_column("GENEID") %>%
+  left_join(gene_map, by = "GENEID") %>%
+  filter(!is.na(Gene)) %>%
+  relocate(Gene, .before = 1) %>%
+  select(-GENEID) %>%
+  pivot_longer(
+    cols = -Gene,
+    names_to = "sample",
+    values_to = "value"
+  ) %>%
+  left_join(sample_info, by = "sample") %>%
+  relocate(value, .after = rep) %>%
+  distinct()
+
+saveRDS(geTMM_df, "geTMM_df.rds")
+
+
+
+# ------------------------------------------------------------
+# 3d. TPM
+# ------------------------------------------------------------
+
+tpm_bio <- sapply(unique(sample_id), function(s) {
+  idx <- sample_id == s
+  
+  # TPM/abundance is not additive across technical runs,
+  # so take the mean across runs
+  rowMeans(txi$abundance[, idx, drop = FALSE])
+})
+
+rownames(tpm_bio) <- rownames(txi$abundance)
+
+tpm_df <- as.data.frame(tpm_bio) %>%
+  rownames_to_column("GENEID") %>%
+  left_join(gene_map, by = "GENEID") %>%
+  filter(!is.na(Gene)) %>%
+  relocate(Gene, .before = 1) %>%
+  select(-GENEID) %>%
+  pivot_longer(
+    cols = -Gene,
+    names_to = "sample",
+    values_to = "value"
+  ) %>%
+  left_join(sample_info, by = "sample") %>%
+  relocate(value, .after = rep) %>%
+  distinct()
+
+saveRDS(tpm_df, "tpm_df.rds")
 ```
 
 

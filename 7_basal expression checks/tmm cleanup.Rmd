@@ -5,26 +5,234 @@ library(writexl)
 ```
 
 ```{r read and clean}
+
 tmm_raw = readRDS("../data/basal comparisons/tmm_df.rds")
 
 tmm_clean = tmm_raw %>%
   mutate(
-    celltype = factor(celltype, levels = c("B2B", "ALI", "HBE", "brushings")),
+    celltype = factor(
+      celltype, 
+      levels = c("B2B", "ALI", "HBE", "brushings")),
     time = factor(time, levels = c("2h", "6h", "0h")),
     rep = factor(rep, levels = unique(rep))
   ) %>%
   arrange(Gene, celltype, time, rep) %>%
   mutate(sample = factor(sample, levels = unique(sample))) %>%
   group_by(Gene) %>%
-  filter(!all(tmm_count == 0)) %>%
+  filter(!all(value == 0)) %>%
   ungroup() %>%
   filter(grepl("^[A-Za-z0-9]+$", Gene)) %>%
   group_by(Gene, sample, celltype, treatment, time, rep) %>%
   summarise(
-    tmm_count = sum(tmm_count),
+    value = sum(value),
+    .groups = "drop"
+  )
+
+geTMM_raw = readRDS("../data/basal comparisons/geTMM_df.rds")
+
+geTMM_clean = geTMM_raw %>%
+  mutate(
+    celltype = factor(
+      celltype, 
+      levels = c("B2B", "ALI", "HBE", "brushings")),
+    time = factor(time, levels = c("2h", "6h", "0h")),
+    rep = factor(rep, levels = unique(rep))
+  ) %>%
+  arrange(Gene, celltype, time, rep) %>%
+  mutate(sample = factor(sample, levels = unique(sample))) %>%
+  group_by(Gene) %>%
+  filter(!all(value == 0)) %>%
+  ungroup() %>%
+  filter(grepl("^[A-Za-z0-9]+$", Gene)) %>%
+  group_by(Gene, sample, celltype, treatment, time, rep) %>%
+  summarise(
+    value = sum(value),
+    .groups = "drop"
+  )
+
+tpm_raw = readRDS("../data/basal comparisons/tpm_df.rds")
+
+tpm_clean = tpm_raw %>%
+  mutate(
+    celltype = factor(
+      celltype, 
+      levels = c("B2B", "ALI", "HBE", "brushings")),
+    time = factor(time, levels = c("2h", "6h", "0h")),
+    rep = factor(rep, levels = unique(rep))
+  ) %>%
+  arrange(Gene, celltype, time, rep) %>%
+  mutate(sample = factor(sample, levels = unique(sample))) %>%
+  group_by(Gene) %>%
+  filter(!all(value == 0)) %>%
+  ungroup() %>%
+  filter(grepl("^[A-Za-z0-9]+$", Gene)) %>%
+  group_by(Gene, sample, celltype, treatment, time, rep) %>%
+  summarise(
+    value = mean(value),
     .groups = "drop"
   )
 ```
+
+
+
+```{r check normalization factors}
+tmm_norm = read_tsv(
+  "../data/basal comparisons/tmm_normfactors.txt"
+  ) %>%
+  select(sample, tmm_norm = norm.factors)
+
+geTMM_norm = read_tsv(
+  "../data/basal comparisons/geTMM_normfactors.txt"
+  ) %>%
+  select(sample, getmm_norm = norm.factors)
+
+df = left_join(tmm_norm, geTMM_norm, by = "sample") %>%
+  left_join(
+    read_tsv("../data/basal comparisons/meta_ali-b2b-hbe-brushings_basal.txt")
+  ) %>%
+  distinct(sample, celltype, time, tmm_norm, getmm_norm, celltype)
+
+ggplot(
+  df,
+  aes(
+    x = tmm_norm, 
+    y = getmm_norm
+    )
+) +
+  geom_point(
+    aes(color = celltype, shape = time)
+  ) +
+  geom_smooth(
+    method = "lm",
+    aes(color = celltype),
+    se = F,
+    linetype = "solid",
+    lwd = 0.3
+  ) +
+  geom_abline(
+    slope = 1, 
+    intercept = 0,
+    linetype = "dashed",
+    lwd = 0.3
+    ) +
+  theme_classic() +
+  theme(aspect.ratio = 1) +
+  labs(
+    x = "TMM library normalization factor",
+    y = "GeTMM library normalization factor"
+  )
+
+df %>%
+  summarise(
+    correlation = cor(tmm_norm, getmm_norm),
+    mean_tmm = mean(tmm_norm),
+    mean_getmm = mean(getmm_norm),
+    mean_ratio = mean(getmm_norm / tmm_norm),
+    min_ratio = min(getmm_norm / tmm_norm),
+    max_ratio = max(getmm_norm / tmm_norm)
+  )
+```
+
+
+```{r check pca plots, fig.height=3, fig.width=5}
+
+run_pca <- function(df) {
+  
+  # Gene x sample matrix
+  mat <- df %>%
+    select(Gene, sample, value) %>%
+    pivot_wider(
+      names_from = sample,
+      values_from = value,
+      values_fill = 0
+    )
+  
+  gene_names <- mat$Gene
+  mat <- mat %>%
+    select(-Gene) %>%
+    as.matrix()
+  
+  rownames(mat) <- gene_names
+  
+  # log transform
+  mat <- log2(mat + 1)
+  
+  # PCA: samples are observations, genes are variables
+  pca <- prcomp(
+    t(mat),
+    center = TRUE,
+    scale. = TRUE
+  )
+  
+  # variance explained
+  var_explained <- 100 * pca$sdev^2 / sum(pca$sdev^2)
+  
+  # sample metadata
+  metadata <- df %>%
+    select(sample, celltype, treatment, time, rep) %>%
+    distinct()
+  
+  scores <- as.data.frame(pca$x) %>%
+    rownames_to_column("sample") %>%
+    left_join(metadata, by = "sample") %>%
+    mutate(
+      PC1_label = paste0("PC1 (", round(var_explained[1], 1), "%)"),
+      PC2_label = paste0("PC2 (", round(var_explained[2], 1), "%)")
+    )
+  
+  list(
+    pca = pca,
+    scores = scores,
+    variance = var_explained
+  )
+}
+
+pca_tpm <- run_pca(tpm_clean)
+pca_tmm <- run_pca(tmm_clean)
+pca_geTMM <- run_pca(geTMM_clean)
+
+ggplot(pca_tpm$scores,
+       aes(x = PC1, y = PC2,
+           color = celltype,
+           shape = time)) +
+  geom_point(size = 1) +
+  labs(
+    title = "TPM",
+    x = pca_tpm$scores$PC1_label[1],
+    y = pca_tpm$scores$PC2_label[1]
+  ) +
+  theme_classic() +
+  theme(aspect.ratio = 1)
+
+ggplot(pca_tmm$scores,
+       aes(x = PC1, y = PC2,
+           color = celltype,
+           shape = time)) +
+  geom_point(size = 1) +
+  labs(
+    title = "TMM",
+    x = pca_tmm$scores$PC1_label[1],
+    y = pca_tmm$scores$PC2_label[1]
+  ) +
+  theme_classic() +
+  theme(aspect.ratio = 1)
+
+ggplot(pca_geTMM$scores,
+       aes(x = PC1, y = PC2,
+           color = celltype,
+           shape = time)) +
+  geom_point(size = 1) +
+  labs(
+    title = "GeTMM",
+    x = pca_geTMM$scores$PC1_label[1],
+    y = pca_geTMM$scores$PC2_label[1]
+  ) +
+  theme_classic() +
+  theme(aspect.ratio = 1)
+
+
+```
+
 
 ```{r pivot wide for mark}
 wide = tmm_clean %>%
