@@ -234,23 +234,23 @@ ggplot(pca_geTMM$scores,
 ```
 
 
-```{r pivot wide for mark}
+```{r pivot tmms for mark}
 wide = tmm_clean %>%
   select(-c(celltype, treatment, time, rep)) %>%
-  pivot_wider(values_from = "tmm_count", names_from = "sample")
+  pivot_wider(values_from = "value", names_from = "sample")
 
 wide_mean = tmm_clean %>%
   group_by(Gene, celltype, treatment, time) %>%
-  summarize(tmm_count = mean(tmm_count), .groups = "drop") %>%
+  summarize(value = mean(value), .groups = "drop") %>%
   mutate(sample = paste(celltype, time, sep = "_")) %>%
   select(-c(celltype, treatment, time)) %>%
-  pivot_wider(values_from = "tmm_count", names_from = "sample")
+  pivot_wider(values_from = "value", names_from = "sample")
 
 wide_mean2 = tmm_clean %>%
   group_by(Gene, celltype, treatment) %>%
-  summarize(tmm_count = mean(tmm_count), .groups = "drop") %>%
+  summarize(value = mean(value), .groups = "drop") %>%
   select(-c(treatment)) %>%
-  pivot_wider(values_from = "tmm_count", names_from = "celltype")
+  pivot_wider(values_from = "value", names_from = "celltype")
 
 write_xlsx(
   list(
@@ -258,7 +258,64 @@ write_xlsx(
     "mean reps, time-sensitive" = wide_mean,
     "mean reps, time-agnostic" =  wide_mean2
   ), 
-  "../data/basal comparisons/wide_tmm-adjusted-counts.xlsx"
+  "../data/basal comparisons/tmm_wide.xlsx"
 )
 ```
+
+```{r pivot getmms for mark}
+wide = geTMM_clean %>%
+  select(-c(celltype, treatment, time, rep)) %>%
+  pivot_wider(values_from = "value", names_from = "sample")
+
+wide_mean = geTMM_clean %>%
+  group_by(Gene, celltype, treatment, time) %>%
+  summarize(value = mean(value), .groups = "drop") %>%
+  mutate(sample = paste(celltype, time, sep = "_")) %>%
+  select(-c(celltype, treatment, time)) %>%
+  pivot_wider(values_from = "value", names_from = "sample")
+
+wide_mean2 = geTMM_clean %>%
+  group_by(Gene, celltype, treatment) %>%
+  summarize(value = mean(value), .groups = "drop") %>%
+  select(-c(treatment)) %>%
+  pivot_wider(values_from = "value", names_from = "celltype")
+
+write_xlsx(
+  list(
+    "GeTMM-adjusted counts" = wide,
+    "mean reps, time-sensitive" = wide_mean,
+    "mean reps, time-agnostic" =  wide_mean2
+  ), 
+  "../data/basal comparisons/GeTMM_wide.xlsx"
+)
+```
+
+```{r pivot tpms for mark}
+wide = tpm_clean %>%
+  select(-c(celltype, treatment, time, rep)) %>%
+  pivot_wider(values_from = "value", names_from = "sample")
+
+wide_mean = tpm_clean %>%
+  group_by(Gene, celltype, treatment, time) %>%
+  summarize(value = mean(value), .groups = "drop") %>%
+  mutate(sample = paste(celltype, time, sep = "_")) %>%
+  select(-c(celltype, treatment, time)) %>%
+  pivot_wider(values_from = "value", names_from = "sample")
+
+wide_mean2 = tpm_clean %>%
+  group_by(Gene, celltype, treatment) %>%
+  summarize(value = mean(value), .groups = "drop") %>%
+  select(-c(treatment)) %>%
+  pivot_wider(values_from = "value", names_from = "celltype")
+
+write_xlsx(
+  list(
+    "tpm" = wide,
+    "mean reps, time-sensitive" = wide_mean,
+    "mean reps, time-agnostic" =  wide_mean2
+  ), 
+  "../data/basal comparisons/tpm_wide.xlsx"
+)
+```
+
 
