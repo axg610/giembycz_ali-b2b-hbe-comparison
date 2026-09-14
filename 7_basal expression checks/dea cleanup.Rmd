@@ -1,0 +1,108 @@
+```{r setup, include=F}
+library(tidyverse)
+library(readxl)
+library(writexl)
+```
+
+```{r read and clean}
+dea = read_tsv("../data/basal comparisons/basal_dea.txt") %>%
+  group_by(Gene) %>%
+  filter(!all(log2fold == 0)) %>%
+  ungroup()
+```
+
+```{r volcanos, fig.height=3, fig.width=4, dpi=600}
+for(c in c("_vs_B2B", "_vs_ALI", "_vs_HBE")){
+  
+  print(
+    dea %>%
+      filter(str_detect(contrast, c)) %>%
+      mutate(contrast = gsub(c, "", contrast)) %>%
+      mutate(
+        sig = case_when(
+          log2fold >= 1 & FDR <= 0.05 ~ "up",
+          log2fold <=-1 & FDR <= 0.05 ~ "dn",
+          TRUE ~ "ns"
+        )
+      ) %>%
+      
+      ggplot(
+        .,
+        aes(x = log2fold, y = -log10(FDR), color = sig)
+      ) +
+      facet_wrap(~contrast) +
+      geom_point(size = 0.5) +
+      labs(title = c) +
+      scale_color_manual(values = c("steelblue2", "grey30", "firebrick2")) +
+      theme_classic()
+  )
+  
+}
+
+
+```
+
+```{r pie charts}
+dea_pie <- dea %>%
+  filter(
+    contrast %in% c(
+      "ALI_vs_B2B",
+      "HBE_vs_B2B",
+      "ALI_vs_HBE"
+    )
+  ) %>%
+  mutate(
+    sig = case_when(
+      log2fold >= 1 & FDR <= 0.05 ~ "up",
+      log2fold <= -1 & FDR <= 0.05 ~ "dn",
+      TRUE ~ "ns"
+    )
+  ) %>%
+  count(contrast, sig) %>%
+  group_by(contrast) %>%
+  mutate(
+    percent = n / sum(n)
+  ) %>%
+  ungroup()
+
+ggplot(dea_pie, aes(x = "", y = n, fill = sig)) +
+  geom_col(width = 1, color = "black") +
+  coord_polar(theta = "y") +
+  facet_wrap(~contrast, ncol = 2) +
+  theme_void() +
+  scale_fill_manual(
+    values = c(
+      "up" = "firebrick2",
+      "ns" = "grey30",
+      "dn" = "steelblue2"
+    )
+  ) +
+  labs(
+    title = "DEGs between celltypes",
+    fill = NULL
+  ) +
+  geom_text(
+    aes(
+      label = n
+    ),
+    position = position_stack(vjust = 0.5),
+    color = "white",
+    cex = 3
+  ) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+```{r pivot wide for mark}
+wide_dea = dea %>%
+  pivot_longer(cols = c(log2fold, FDR)) %>%
+  unite(name, c(contrast, name), sep = " ") %>%
+  filter(
+    str_detect(name, "ALI_vs_B2B|HBE_vs_B2B|ALI_vs_HBE")
+  ) %>%
+  mutate(name = factor(name, levels = unique(name))) %>%
+  pivot_wider(names_from = name, values_from = value)
+
+write_xlsx(wide_dea, "../data/basal comparisons/basal_dea_wide.xlsx")
+```
+
